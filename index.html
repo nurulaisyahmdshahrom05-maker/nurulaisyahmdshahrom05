@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Integration Calculator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f5f7;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #1d1d1f;
+            margin-bottom: 25px;
+        }
+        .calculator-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        @media (min-width: 768px) {
+            .calculator-layout {
+                grid-template-columns: 300px 1fr;
+            }
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #fbfbfd;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e5e5ea;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #515154;
+        }
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        input:focus {
+            outline: none;
+            border-color: #0071e3;
+        }
+        .result-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e3f2fd;
+            border-left: 5px solid #0071e3;
+            border-radius: 4px;
+        }
+        .result-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #0b6bcb;
+            margin: 0 0 5px 0;
+        }
+        .result-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #1d1d1f;
+            margin: 0;
+        }
+        .error {
+            color: #d32f2f;
+            font-size: 0.85rem;
+            margin-top: 5px;
+            display: none;
+        }
+        .canvas-container {
+            position: relative;
+            min-height: 350px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Integration Visualizer</h1>
+    
+    <div class="calculator-layout">
+        <div class="controls">
+            <div class="input-group">
+                <label for="functionInput">Function f(x)</label>
+                <input type="text" id="functionInput" value="x^2 - 2*x + 1" placeholder="e.g., x^2, sin(x)">
+                <div id="errorMsg" class="error">Invalid expression</div>
+            </div>
+            
+            <div class="input-group">
+                <label for="boundA">Lower Bound (a)</label>
+                <input type="number" id="boundA" value="0" step="any">
+            </div>
+            
+            <div class="input-group">
+                <label for="boundB">Upper Bound (b)</label>
+                <input type="number" id="boundB" value="3" step="any">
+            </div>
+
+            <div class="input-group">
+                <label for="segments">Intervals (n)</label>
+                <input type="number" id="segments" value="30" min="2" max="500">
+            </div>
+            
+            <div class="result-box">
+                <p class="result-title">Definite Integral Estimate</p>
+                <p class="result-value" id="resultDisplay">0.0000</p>
+            </div>
+        </div>
+        
+        <div class="canvas-container">
+            <canvas id="graphCanvas"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Safe mathematical parser supporting basic functions
+    function parseFunction(str) {
+        // Clean up string and handle implicit multiplication/exponents simply
+        let processed = str.toLowerCase()
+            .replace(/([\d])(x)/g, '$1*$2') // 2x -> 2*x
+            .replace(/\^/g, '**')            // ^ -> **
+            .replace(/sin/g, 'Math.sin')
+            .replace(/cos/g, 'Math.cos')
+            .replace(/tan/g, 'Math.tan')
+            .replace(/sqrt/g, 'Math.sqrt')
+            .replace(/exp/g, 'Math.exp')
+            .replace(/pi/g, 'Math.PI');
+
+        // Return a functional JS execution context safely scoped
+        return new Function('x', `with(Math) { return ${processed}; }`);
+    }
+
+    // Elements
+    const functionInput = document.getElementById('functionInput');
+    const boundAInput = document.getElementById('boundA');
+    const boundBInput = document.getElementById('boundB');
+    const segmentsInput = document.getElementById('segments');
+    const resultDisplay = document.getElementById('resultDisplay');
+    const errorMsg = document.getElementById('errorMsg');
+    const ctx = document.getElementById('graphCanvas').getContext('2d');
+
+    let chart;
+
+    function calculateAndDraw() {
+        errorMsg.style.display = 'none';
+        
+        const fStr = functionInput.value;
+        const a = parseFloat(boundAInput.value);
+        const b = parseFloat(boundBInput.value);
+        const n = parseInt(segmentsInput.value) || 20;
+
+        if (isNaN(a) || !isFinite(a) || isNaN(b) || !isFinite(b) || a >= b) {
+            resultDisplay.textContent = "N/A (Check Bounds)";
+            return;
+        }
+
+        try {
+            const f = parseFunction(fStr);
+            
+            // 1. Calculate Numerical Integration via Trapezoidal Rule
+            const h = (b - a) / n;
+            let integralSum = 0.5 * (f(a) + f(b));
+            
+            for (let i = 1; i < n; i++) {
+                integralSum += f(a + i * h);
+            }
+            const area = integralSum * h;
+            
+            // Format check for valid result output
+            if(isNaN(area) || !isFinite(area)){
+                throw new Error("Result is not a finite number");
+            }
+            resultDisplay.textContent = area.toFixed(4);
+
+            // 2. Generate Data for Graphing
+            const graphPadding = (b - a) * 0.3 || 1; // dynamically scale padding
+            const viewMin = a - graphPadding;
+            const viewMax = b + graphPadding;
+            const totalPoints = 150;
+            
+            const lineData = [];
+            const step = (viewMax - viewMin) / totalPoints;
+            
+            for (let i = 0; i <= totalPoints; i++) {
+                let currentX = viewMin + (i * step);
+                try {
+                    let y = f(currentX);
+                    if (isFinite(y) && !isNaN(y)) {
+                        lineData.push({ x: currentX, y: y });
+                    }
+                } catch(e){}
+            }
+
+            // 3. Generate Filled Trapezoids Data for the integration region
+            const filledData = [];
+            for (let i = 0; i <= n; i++) {
+                let currentX = a + (i * h);
+                filledData.push({ x: currentX, y: f(currentX) });
+            }
+
+            // 4. Update or Construct the Chart
+            if (chart) {
+                chart.data.datasets[0].data = lineData;
+                chart.data.datasets[1].data = filledData;
+                chart.options.scales.x.min = viewMin;
+                chart.options.scales.x.max = viewMax;
+                chart.update('none'); // silent update for performance
+            } else {
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [
+                            {
+                                label: `f(x) = ${fStr}`,
+                                data: lineData,
+                                borderColor: '#0071e3',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                fill: false,
+                                order: 1
+                            },
+                            {
+                                label: 'Integrated Area',
+                                data: filledData,
+                                backgroundColor: 'rgba(0, 113, 227, 0.25)',
+                                borderColor: 'rgba(0, 113, 227, 0.5)',
+                                borderWidth: 1,
+                                pointRadius: 1,
+                                fill: 'origin', // fills to y = 0
+                                stepped: false,
+                                order: 2
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                min: viewMin,
+                                max: viewMax,
+                                grid: { color: '#e5e5ea' }
+                            },
+                            y: {
+                                grid: { color: '#e5e5ea' }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: true, position: 'top' }
+                        }
+                    }
+                });
+            }
+
+        } catch (err) {
+            errorMsg.style.display = 'block';
+            resultDisplay.textContent = "Error";
+            console.error(err);
+        }
+    }
+
+    // Event listeners to achieve real-time calculation & interactive feel
+    [functionInput, boundAInput, boundBInput, segmentsInput].forEach(element => {
+        element.addEventListener('input', calculateAndDraw);
+    });
+
+    // Run layout execution on mount
+    calculateAndDraw();
+</script>
+</body>
+</html>
